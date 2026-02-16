@@ -1,0 +1,93 @@
+{
+  description = "codesearch — fast, local semantic code search with BM25 + vector embeddings + tree-sitter AST";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    flake-utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs = { nixpkgs, fenix, flake-utils, ... }:
+    flake-utils.lib.eachDefaultSystem (system: let
+      pkgs = import nixpkgs { inherit system; };
+      lib = pkgs.lib;
+
+      rustToolchain = fenix.packages.${system}.stable.withComponents [
+        "rustc" "cargo" "rust-src" "clippy" "rustfmt" "rust-analyzer"
+      ];
+
+      rustPlatform = pkgs.makeRustPlatform {
+        rustc = rustToolchain;
+        cargo = rustToolchain;
+      };
+
+      # ort-sys 2.0.0-rc.11 requires ORT API version 23 (onnxruntime 1.23+).
+      # nixpkgs 25.05 has 1.23.2.
+      onnxruntime = pkgs.onnxruntime;
+    in {
+      packages.default = rustPlatform.buildRustPackage {
+        pname = "codesearch";
+        version = "0.1.142";
+        src = ./.;
+
+        cargoLock.lockFile = ./Cargo.lock;
+
+        nativeBuildInputs = with pkgs; [
+          protobuf
+          pkg-config
+          cmake
+        ];
+
+        buildInputs = [
+          pkgs.openssl
+          onnxruntime
+        ] ++ lib.optionals pkgs.stdenv.isDarwin [
+          pkgs.darwin.apple_sdk.frameworks.Security
+          pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+        ];
+
+        # Tell the `ort` crate to use pre-built ONNX Runtime from nixpkgs
+        # instead of downloading binaries at build time (blocked by Nix sandbox)
+        ORT_LIB_LOCATION = "${onnxruntime}/lib";
+        ORT_PREFER_DYNAMIC_LINK = "1";
+
+        # The Nix sandbox unpacks source into $NIX_BUILD_TOP/source/ but cargo
+        # writes to $NIX_BUILD_TOP/target/ — the install hook expects target/ to
+        # be relative to pwd (source/). Fix by anchoring CARGO_TARGET_DIR.
+        preBuild = ''
+          export CARGO_TARGET_DIR="$(pwd)/target"
+        '';
+
+        # Ensure the ONNX Runtime dylib is found at runtime via rpath
+        postFixup = lib.optionalString pkgs.stdenv.isDarwin ''
+          install_name_tool -add_rpath "${onnxruntime}/lib" "$out/bin/codesearch"
+        '';
+
+        doCheck = false;
+      };
+
+      devShells.default = pkgs.mkShell {
+        nativeBuildInputs = [
+          rustToolchain
+          pkgs.pkg-config
+          pkgs.cmake
+          pkgs.protobuf
+        ];
+
+        buildInputs = [
+          pkgs.openssl
+          onnxruntime
+        ] ++ lib.optionals pkgs.stdenv.isDarwin [
+          pkgs.darwin.apple_sdk.frameworks.Security
+          pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+        ];
+
+        ORT_LIB_LOCATION = "${onnxruntime}/lib";
+        ORT_PREFER_DYNAMIC_LINK = "1";
+        RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
+      };
+    });
+}
