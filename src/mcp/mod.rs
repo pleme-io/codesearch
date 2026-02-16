@@ -1047,17 +1047,15 @@ pub async fn run_mcp_server(path: Option<PathBuf>, cancel_token: CancellationTok
         384
     };
 
-    // Create shared stores - try write mode first, fall back to readonly if locked
-    // This enables multiple terminal windows to use the same database
-    tracing::info!("📦 Creating shared stores...");
-    let (shared_stores, is_readonly) = SharedStores::new_or_readonly(&db_path, dimensions)?;
+    // Always open in readonly mode — the `serve` daemon is responsible for
+    // indexing and file watching. Running refresh + FSEvents watcher inside
+    // the MCP process causes a hot loop on large codebases (900%+ CPU)
+    // because refresh reads trigger filesystem events that trigger more
+    // refreshes indefinitely.
+    tracing::info!("📦 Creating shared stores (readonly)...");
+    let shared_stores = SharedStores::new_readonly(&db_path, dimensions)?;
     let shared_stores = Arc::new(shared_stores);
-
-    if is_readonly {
-        tracing::warn!("🔒 Running in READONLY mode (another instance has write access)");
-        tracing::warn!("   ↳ Searches work normally, but index won't auto-update");
-        tracing::warn!("   ↳ Close the other instance to enable write mode");
-    }
+    let is_readonly = true;
 
     // Create MCP service with shared stores (ready immediately)
     let service = CodesearchService::new_with_stores(
