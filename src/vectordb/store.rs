@@ -99,6 +99,21 @@ pub struct VectorStore {
 }
 
 impl VectorStore {
+    /// Clear stale LMDB reader slots left by crashed processes.
+    ///
+    /// LMDB has a fixed reader table (default 126 slots). Processes that crash
+    /// without closing their read transactions leave stale entries. When the table
+    /// fills up, new read transactions fail with `MDB_READERS_FULL`.
+    ///
+    /// Call this on startup to reclaim slots from dead PIDs.
+    pub fn clear_stale_readers(&self) -> anyhow::Result<usize> {
+        let cleared = self.env.clear_stale_readers()?;
+        if cleared > 0 {
+            tracing::info!("Cleared {} stale LMDB reader slots", cleared);
+        }
+        Ok(cleared)
+    }
+
     /// Create or open a vector store
     ///
     /// # Arguments

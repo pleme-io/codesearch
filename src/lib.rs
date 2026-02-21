@@ -2,6 +2,7 @@ pub mod bench;
 pub mod cache;
 pub mod chunker;
 pub mod constants;
+pub mod daemon;
 pub mod db_discovery;
 pub mod embed;
 pub mod error;

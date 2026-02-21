@@ -3,6 +3,7 @@ mod cache;
 mod chunker;
 mod cli;
 mod constants;
+mod daemon;
 mod db_discovery;
 mod embed;
 mod file;
@@ -65,7 +66,7 @@ async fn main() -> Result<()> {
     // For MCP/serve commands: DON'T initialize tracing here.
     // init_logger() in cli/mod.rs will set up console+file logging as the FIRST
     // and ONLY global subscriber (you can only set it once per process).
-    let is_mcp_or_serve = args.iter().any(|a| a == "mcp" || a == "serve");
+    let is_mcp_or_serve = args.iter().any(|a| a == "mcp" || a == "serve" || a == "daemon");
 
     if !is_quiet && !is_json && !is_mcp_or_serve {
         // Console-only tracing for short-lived CLI commands (search, index, stats, etc.)

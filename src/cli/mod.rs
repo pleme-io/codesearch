@@ -189,6 +189,13 @@ pub enum Commands {
         /// Path to project (defaults to current directory)
         path: Option<PathBuf>,
     },
+
+    /// Run multi-repo daemon with HTTP search and periodic re-indexing
+    Daemon {
+        /// Path to YAML config file
+        #[arg(short, long)]
+        config: PathBuf,
+    },
 }
 
 pub async fn run(cancel_token: CancellationToken) -> Result<()> {
@@ -351,6 +358,23 @@ pub async fn run(cancel_token: CancellationToken) -> Result<()> {
                 }
             }
             crate::mcp::run_mcp_server(path, cancel_token).await
+        }
+        Commands::Daemon { config } => {
+            // Initialize file+console logger for long-running daemon.
+            // init_logger appends "logs/" to the base path, so pass ~/.codesearch
+            // to get logs at ~/.codesearch/logs/codesearch.log
+            let log_base = dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+                .join(".codesearch");
+            match crate::logger::init_logger(&log_base, log_level, cli.quiet) {
+                Err(e) => {
+                    eprintln!("Warning: Failed to initialize file logger: {}", e);
+                }
+                _ => {}
+            }
+
+            let daemon_config = crate::daemon::DaemonConfig::load(&config)?;
+            crate::daemon::run_daemon(daemon_config, cancel_token).await
         }
     }
 }
