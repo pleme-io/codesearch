@@ -3,32 +3,31 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
-    fenix = {
-      url = "github:nix-community/fenix";
+    flake-utils.url = "github:numtide/flake-utils";
+    substrate = {
+      url = "github:pleme-io/substrate";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { nixpkgs, fenix, flake-utils, ... }:
+  outputs = { self, nixpkgs, flake-utils, substrate, ... }:
     flake-utils.lib.eachDefaultSystem (system: let
-      pkgs = import nixpkgs { inherit system; };
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [ substrate.overlays.${system}.rust ];
+      };
       lib = pkgs.lib;
 
-      rustToolchain = fenix.packages.${system}.stable.withComponents [
-        "rustc" "cargo" "rust-src" "clippy" "rustfmt" "rust-analyzer"
-      ];
-
       rustPlatform = pkgs.makeRustPlatform {
-        rustc = rustToolchain;
-        cargo = rustToolchain;
+        rustc = pkgs.fenixRustToolchain;
+        cargo = pkgs.fenixRustToolchain;
       };
 
       # ort-sys 2.0.0-rc.11 requires ORT API version 23 (onnxruntime 1.23+).
       # nixpkgs 25.05 has 1.23.2.
       onnxruntime = pkgs.onnxruntime;
-    in {
-      packages.default = rustPlatform.buildRustPackage {
+
+      codesearch = rustPlatform.buildRustPackage {
         pname = "codesearch";
         version = "0.1.142";
         src = ./.;
@@ -68,10 +67,15 @@
 
         doCheck = false;
       };
+    in {
+      packages = {
+        default = codesearch;
+        inherit codesearch;
+      };
 
       devShells.default = pkgs.mkShell {
         nativeBuildInputs = [
-          rustToolchain
+          pkgs.fenixRustToolchain
           pkgs.pkg-config
           pkgs.cmake
           pkgs.protobuf
@@ -87,7 +91,13 @@
 
         ORT_LIB_LOCATION = "${onnxruntime}/lib";
         ORT_PREFER_DYNAMIC_LINK = "1";
-        RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
+        RUST_SRC_PATH = "${pkgs.fenixRustToolchain}/lib/rustlib/src/rust/library";
       };
-    });
+    }) // {
+      # Non-per-system outputs
+      homeManagerModules.default = import ./module;
+      overlays.default = final: prev: {
+        codesearch = self.packages.${final.system}.default;
+      };
+    };
 }
