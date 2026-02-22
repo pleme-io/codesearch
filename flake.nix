@@ -43,17 +43,16 @@
         buildInputs = [
           pkgs.openssl
           onnxruntime
-        ] ++ lib.optionals pkgs.stdenv.isDarwin [
-          pkgs.libiconv
-        ] ++ (
-          if pkgs ? apple-sdk
-          then [ pkgs.apple-sdk ]
-          else lib.optionals (pkgs ? darwin) (
-            with pkgs.darwin.apple_sdk.frameworks; [
-              Security
-              SystemConfiguration
-            ]
-          )
+        ] ++ lib.optionals pkgs.stdenv.isDarwin (
+          [ pkgs.libiconv ]
+          ++ (if pkgs ? apple-sdk
+              then [ pkgs.apple-sdk ]
+              else lib.optionals (pkgs ? darwin) (
+                with pkgs.darwin.apple_sdk.frameworks; [
+                  Security
+                  SystemConfiguration
+                ]
+              ))
         );
 
         # Tell the `ort` crate to use pre-built ONNX Runtime from nixpkgs
@@ -92,17 +91,16 @@
         buildInputs = [
           pkgs.openssl
           onnxruntime
-        ] ++ lib.optionals pkgs.stdenv.isDarwin [
-          pkgs.libiconv
-        ] ++ (
-          if pkgs ? apple-sdk
-          then [ pkgs.apple-sdk ]
-          else lib.optionals (pkgs ? darwin) (
-            with pkgs.darwin.apple_sdk.frameworks; [
-              Security
-              SystemConfiguration
-            ]
-          )
+        ] ++ lib.optionals pkgs.stdenv.isDarwin (
+          [ pkgs.libiconv ]
+          ++ (if pkgs ? apple-sdk
+              then [ pkgs.apple-sdk ]
+              else lib.optionals (pkgs ? darwin) (
+                with pkgs.darwin.apple_sdk.frameworks; [
+                  Security
+                  SystemConfiguration
+                ]
+              ))
         );
 
         ORT_LIB_LOCATION = "${onnxruntime}/lib";
