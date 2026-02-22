@@ -5,6 +5,8 @@
 # The daemon manages all repos via a single process reading a YAML config.
 # The MCP entry exposes a serverEntry attrset for consumption by claude modules.
 #
+# Module factory: receives { hmHelpers } from flake.nix, returns HM module.
+{ hmHelpers }:
 {
   lib,
   config,
@@ -12,6 +14,7 @@
   ...
 }:
 with lib; let
+  inherit (hmHelpers) mkMcpOptions mkMcpServerEntry mkLaunchdService mkSystemdService;
   daemonCfg = config.services.codesearch.daemon;
   mcpCfg = config.services.codesearch.mcp;
   githubCfg = daemonCfg.github;
@@ -144,84 +147,43 @@ in {
       };
     };
 
-    # ── MCP options ────────────────────────────────────────────────────
-    mcp = {
-      enable = mkOption {
-        type = types.bool;
-        default = false;
-        description = "Generate MCP server entry for codesearch (consumed by claude modules)";
-      };
-
-      package = mkOption {
-        type = types.package;
-        default = daemonCfg.package;
-        defaultText = literalExpression "config.services.codesearch.daemon.package";
-        description = "codesearch package for MCP server binary";
-      };
-
-      serverEntry = mkOption {
-        type = types.attrs;
-        default = {};
-        internal = true;
-        description = "Generated MCP server attrset — consumed by claude module, not set by users";
-      };
+    # ── MCP options (from substrate hm-service-helpers) ───────────────
+    mcp = mkMcpOptions {
+      defaultPackage = daemonCfg.package;
+      defaultPackageText = "config.services.codesearch.daemon.package";
     };
   };
 
   # ── Config ─────────────────────────────────────────────────────────
   config = mkMerge [
-    # MCP server entry (always generated when mcp.enable is true)
+    # MCP server entry
     (mkIf mcpCfg.enable {
-      services.codesearch.mcp.serverEntry = {
-        type = "stdio";
+      services.codesearch.mcp.serverEntry = mkMcpServerEntry {
         command = "${mcpCfg.package}/bin/codesearch";
         args = ["mcp"];
-        env = {
-          CODESEARCH_LMDB_MAP_SIZE_MB = toString daemonCfg.lmdbMapSizeMB;
-        };
+        env.CODESEARCH_LMDB_MAP_SIZE_MB = toString daemonCfg.lmdbMapSizeMB;
       };
     })
 
     # Darwin: launchd agent for codesearch daemon
-    (mkIf (daemonCfg.enable && isDarwin && (daemonCfg.repos != [] || githubCfg.enable)) {
-      launchd.agents.codesearch-daemon = {
-        enable = true;
-        config = {
-          Label = "io.pleme.codesearch-daemon";
-          ProgramArguments = [
-            "${daemonCfg.package}/bin/codesearch"
-            "daemon"
-            "--config"
-            "${codesearchDaemonConfig}"
-          ];
-          EnvironmentVariables = {
-            CODESEARCH_LMDB_MAP_SIZE_MB = toString daemonCfg.lmdbMapSizeMB;
-          };
-          RunAtLoad = true;
-          KeepAlive = true;
-          ProcessType = "Adaptive";
-          StandardOutPath = "${config.home.homeDirectory}/Library/Logs/codesearch-daemon.log";
-          StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/codesearch-daemon.err";
-        };
-      };
-    })
+    (mkIf (daemonCfg.enable && isDarwin && (daemonCfg.repos != [] || githubCfg.enable))
+      (mkLaunchdService {
+        name = "codesearch-daemon";
+        label = "io.pleme.codesearch-daemon";
+        command = "${daemonCfg.package}/bin/codesearch";
+        args = ["daemon" "--config" "${codesearchDaemonConfig}"];
+        env.CODESEARCH_LMDB_MAP_SIZE_MB = toString daemonCfg.lmdbMapSizeMB;
+        logDir = "${config.home.homeDirectory}/Library/Logs";
+      }))
 
     # Linux: systemd user service for codesearch daemon
-    (mkIf (daemonCfg.enable && !isDarwin && (daemonCfg.repos != [] || githubCfg.enable)) {
-      systemd.user.services.codesearch-daemon = {
-        Unit = {
-          Description = "Codesearch daemon — semantic code search";
-          After = ["default.target"];
-        };
-        Service = {
-          Type = "simple";
-          ExecStart = "${daemonCfg.package}/bin/codesearch daemon --config ${codesearchDaemonConfig}";
-          Environment = "CODESEARCH_LMDB_MAP_SIZE_MB=${toString daemonCfg.lmdbMapSizeMB}";
-          Restart = "on-failure";
-          RestartSec = 5;
-        };
-        Install.WantedBy = ["default.target"];
-      };
-    })
+    (mkIf (daemonCfg.enable && !isDarwin && (daemonCfg.repos != [] || githubCfg.enable))
+      (mkSystemdService {
+        name = "codesearch-daemon";
+        description = "Codesearch daemon — semantic code search";
+        command = "${daemonCfg.package}/bin/codesearch";
+        args = ["daemon" "--config" "${codesearchDaemonConfig}"];
+        env.CODESEARCH_LMDB_MAP_SIZE_MB = toString daemonCfg.lmdbMapSizeMB;
+      }))
   ];
 }
