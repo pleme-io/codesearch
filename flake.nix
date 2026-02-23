@@ -41,7 +41,6 @@
         ];
 
         buildInputs = [
-          pkgs.openssl
           onnxruntime
         ] ++ lib.optionals pkgs.stdenv.isDarwin (
           [ pkgs.libiconv ]
@@ -56,7 +55,8 @@
         );
 
         # Tell the `ort` crate to use pre-built ONNX Runtime from nixpkgs
-        # instead of downloading binaries at build time (blocked by Nix sandbox)
+        # instead of downloading binaries at build time (blocked by Nix sandbox).
+        # All TLS uses rustls — no OpenSSL/native-tls dependency.
         ORT_LIB_LOCATION = "${onnxruntime}/lib";
         ORT_PREFER_DYNAMIC_LINK = "1";
 
@@ -89,7 +89,6 @@
         ];
 
         buildInputs = [
-          pkgs.openssl
           onnxruntime
         ] ++ lib.optionals pkgs.stdenv.isDarwin (
           [ pkgs.libiconv ]

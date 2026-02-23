@@ -27,11 +27,11 @@ ctrlc = "3.4"
 anyhow = "1.0"
 thiserror = "1.0"
 
-# ML & Embeddings
-fastembed = "5.0"
-ort = { version = "2.0.0-rc.10", features = ["download-binaries", "copy-dylibs"] }
+# ML & Embeddings — all TLS via rustls (no OpenSSL/native-tls dependency)
+# ORT_LIB_LOCATION provides ONNX Runtime at build time, so download-binaries is not needed.
+fastembed = { version = "5.0", default-features = false, features = ["hf-hub", "hf-hub-rustls-tls", "image", "image-models"] }
+ort = { version = "2.0.0-rc.10", default-features = false, features = ["std", "ndarray", "copy-dylibs"] }
 ndarray = "0.16"
-hf-hub = "0.3"
 
 # Vector DB (temporarily commented due to dep conflicts)
 # lancedb = "0.5"
