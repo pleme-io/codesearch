@@ -18,6 +18,8 @@
       };
       lib = pkgs.lib;
 
+      darwinBuildInputs = (import "${substrate}/lib/darwin.nix").mkDarwinBuildInputs pkgs;
+
       rustPlatform = pkgs.makeRustPlatform {
         rustc = pkgs.fenixRustToolchain;
         cargo = pkgs.fenixRustToolchain;
@@ -40,19 +42,7 @@
           cmake
         ];
 
-        buildInputs = [
-          onnxruntime
-        ] ++ lib.optionals pkgs.stdenv.isDarwin (
-          [ pkgs.libiconv ]
-          ++ (if pkgs ? apple-sdk
-              then [ pkgs.apple-sdk ]
-              else lib.optionals (pkgs ? darwin) (
-                with pkgs.darwin.apple_sdk.frameworks; [
-                  Security
-                  SystemConfiguration
-                ]
-              ))
-        );
+        buildInputs = [ onnxruntime ] ++ darwinBuildInputs;
 
         # Tell the `ort` crate to use pre-built ONNX Runtime from nixpkgs
         # instead of downloading binaries at build time (blocked by Nix sandbox).
@@ -88,19 +78,7 @@
           pkgs.protobuf
         ];
 
-        buildInputs = [
-          onnxruntime
-        ] ++ lib.optionals pkgs.stdenv.isDarwin (
-          [ pkgs.libiconv ]
-          ++ (if pkgs ? apple-sdk
-              then [ pkgs.apple-sdk ]
-              else lib.optionals (pkgs ? darwin) (
-                with pkgs.darwin.apple_sdk.frameworks; [
-                  Security
-                  SystemConfiguration
-                ]
-              ))
-        );
+        buildInputs = [ onnxruntime ] ++ darwinBuildInputs;
 
         ORT_LIB_LOCATION = "${onnxruntime}/lib";
         ORT_PREFER_DYNAMIC_LINK = "1";
