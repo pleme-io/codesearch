@@ -2,7 +2,7 @@
   description = "codesearch — fast, local semantic code search with BM25 + vector embeddings + tree-sitter AST";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
     substrate = {
       url = "github:pleme-io/substrate";
