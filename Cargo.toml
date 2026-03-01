@@ -1,14 +1,16 @@
 [package]
-name = "codesearch"
+name = "pleme-codesearch"
 version = "0.1.142"
 edition = "2021"
-authors = ["codesearch contributors"]
+authors = ["Pleme Team <team@pleme.io>"]
 license = "Apache-2.0"
-description = "Fast, local semantic code search powered by Rust"
+description = "Fast, local semantic code search powered by Rust — BM25, vector embeddings, tree-sitter AST"
 repository = "https://github.com/pleme-io/codesearch"
+homepage = "https://github.com/pleme-io/codesearch"
 readme = "README.md"
 keywords = ["search", "semantic", "grep", "embeddings", "code"]
 categories = ["command-line-utilities", "development-tools"]
+exclude = ["module/", "target/", "result-*", "Cargo.nix", "flake.nix", "flake.lock", ".codesearch.db/"]
 
 [lib]
 name = "codesearch"
