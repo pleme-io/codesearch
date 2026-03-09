@@ -122,13 +122,23 @@ impl CodesearchService {
     fn get_embedding_service(&self) -> Result<std::sync::MutexGuard<'_, Option<EmbeddingService>>> {
         let mut guard = self.embedding_service.lock().unwrap();
         if guard.is_none() {
+            tracing::info!("Loading ONNX embedding model (first use)...");
             let cache_dir = crate::constants::get_global_models_cache_dir()?;
             *guard = Some(EmbeddingService::with_cache_dir(
                 self.model_type,
                 Some(&cache_dir),
             )?);
+            tracing::info!("ONNX embedding model loaded");
         }
         Ok(guard)
+    }
+
+    /// Pre-warm the embedding service so the first search doesn't block.
+    /// Call this before the server starts accepting requests.
+    #[allow(dead_code)] // Public API for standalone/test use
+    pub fn warm_embedding_service(&self) -> Result<()> {
+        drop(self.get_embedding_service()?);
+        Ok(())
     }
 
     /// Check if database exists and return error if not
@@ -1064,6 +1074,32 @@ pub async fn run_mcp_server(path: Option<PathBuf>, cancel_token: CancellationTok
     )?;
 
     tracing::info!("🧠 Model: {}", service.model_type.name());
+
+    // Pre-warm the ONNX embedding model off the async runtime.
+    // Without this, the first semantic_search call blocks tokio for 3-10s
+    // while ONNX loads, causing MCP timeouts and UI freezes.
+    tracing::info!("🔥 Pre-warming ONNX embedding model...");
+    {
+        let model_type = service.model_type;
+        let cache_dir = crate::constants::get_global_models_cache_dir()?;
+        let embedding = tokio::task::spawn_blocking(move || {
+            EmbeddingService::with_cache_dir(model_type, Some(&cache_dir))
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Model pre-warm task panicked: {}", e))?;
+
+        match embedding {
+            Ok(svc) => {
+                // Store the pre-warmed service
+                let mut guard = service.embedding_service.lock().unwrap();
+                *guard = Some(svc);
+                tracing::info!("✅ ONNX embedding model ready");
+            }
+            Err(e) => {
+                tracing::warn!("⚠️ Failed to pre-warm model (will retry on first search): {}", e);
+            }
+        }
+    }
 
     // START MCP SERVER NOW - fixes timeout!
     tracing::info!(
