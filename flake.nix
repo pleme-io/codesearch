@@ -2,7 +2,7 @@
   description = "codesearch — fast, local semantic code search with BM25 + vector embeddings + tree-sitter AST";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     substrate = {
       url = "github:pleme-io/substrate";
@@ -30,7 +30,7 @@
       };
 
       # ort-sys 2.0.0-rc.11 requires ORT API version 23 (onnxruntime 1.23+).
-      # nixpkgs 25.05 has 1.23.2.
+      # nixos-unstable has 1.23.2; nixos-25.11 only has 1.22.2 (API v22).
       onnxruntime = pkgs.onnxruntime;
 
       codesearch = rustPlatform.buildRustPackage {
