@@ -156,16 +156,17 @@ in {
 
   # ── Config ─────────────────────────────────────────────────────────
   config = mkMerge [
-    # Self-register with anvil (primary path)
-    (mkIf mcpCfg.enable (mkAnvilRegistration {
+    # Self-register with anvil unconditionally — enable flag controls activation.
+    (mkAnvilRegistration {
       name = "codesearch";
       command = "codesearch";
       args = ["mcp"];
       package = mcpCfg.package;
+      enable = mcpCfg.enable;
       env.CODESEARCH_LMDB_MAP_SIZE_MB = toString daemonCfg.lmdbMapSizeMB;
       description = "Semantic code search (BM25 + embeddings)";
       scopes = mcpCfg.scopes;
-    }))
+    })
 
     # Deprecated: serverEntry (kept for backward compatibility)
     (mkIf mcpCfg.enable {
