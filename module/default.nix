@@ -14,7 +14,7 @@
   ...
 }:
 with lib; let
-  inherit (hmHelpers) mkMcpOptions mkMcpServerEntry mkLaunchdService mkSystemdService;
+  inherit (hmHelpers) mkMcpOptions mkMcpServerEntry mkAnvilRegistration mkLaunchdService mkSystemdService;
   daemonCfg = config.services.codesearch.daemon;
   mcpCfg = config.services.codesearch.mcp;
   githubCfg = daemonCfg.github;
@@ -156,7 +156,18 @@ in {
 
   # ── Config ─────────────────────────────────────────────────────────
   config = mkMerge [
-    # MCP server entry
+    # Self-register with anvil (primary path)
+    (mkIf mcpCfg.enable (mkAnvilRegistration {
+      name = "codesearch";
+      command = "codesearch";
+      args = ["mcp"];
+      package = mcpCfg.package;
+      env.CODESEARCH_LMDB_MAP_SIZE_MB = toString daemonCfg.lmdbMapSizeMB;
+      description = "Semantic code search (BM25 + embeddings)";
+      scopes = mcpCfg.scopes;
+    }))
+
+    # Deprecated: serverEntry (kept for backward compatibility)
     (mkIf mcpCfg.enable {
       services.codesearch.mcp.serverEntry = mkMcpServerEntry {
         command = "${mcpCfg.package}/bin/codesearch";
