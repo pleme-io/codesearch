@@ -139,7 +139,7 @@ impl DaemonConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("Failed to read config file {}: {}", path.display(), e))?;
-        let mut config: Self = serde_yaml::from_str(&content)
+        let mut config: Self = serde_yaml_ng::from_str(&content)
             .map_err(|e| anyhow::anyhow!("Failed to parse config {}: {}", path.display(), e))?;
 
         // Env var overrides
