@@ -29,8 +29,6 @@
         cargo = pkgs.fenixRustToolchain;
       };
 
-      # ort-sys 2.0.0-rc.11 requires ORT API version 23 (onnxruntime 1.23+).
-      # nixos-25.11 has 1.23.2; nixos-25.11 only has 1.22.2 (API v22).
       onnxruntime = pkgs.onnxruntime;
 
       codesearch = rustPlatform.buildRustPackage {
@@ -38,7 +36,8 @@
         version = "0.1.142";
         src = ./.;
 
-        cargoLock.lockFile = ./Cargo.lock;
+        # cargoHash: fixed-output vendor dir (no broken symlinks under follows)
+        cargoHash = "sha256-zVnw9PkS3GSAJcO4g9NzlshQbdTAaHJbE+sOUrakjd8=";
 
         nativeBuildInputs = with pkgs; [
           protobuf
@@ -48,20 +47,13 @@
 
         buildInputs = [ onnxruntime ] ++ darwinBuildInputs;
 
-        # Tell the `ort` crate to use pre-built ONNX Runtime from nixpkgs
-        # instead of downloading binaries at build time (blocked by Nix sandbox).
-        # All TLS uses rustls — no OpenSSL/native-tls dependency.
         ORT_LIB_LOCATION = "${onnxruntime}/lib";
         ORT_PREFER_DYNAMIC_LINK = "1";
 
-        # The Nix sandbox unpacks source into $NIX_BUILD_TOP/source/ but cargo
-        # writes to $NIX_BUILD_TOP/target/ — the install hook expects target/ to
-        # be relative to pwd (source/). Fix by anchoring CARGO_TARGET_DIR.
         preBuild = ''
           export CARGO_TARGET_DIR="$(pwd)/target"
         '';
 
-        # Ensure the ONNX Runtime dylib is found at runtime via rpath
         postFixup = lib.optionalString pkgs.stdenv.isDarwin ''
           install_name_tool -add_rpath "${onnxruntime}/lib" "$out/bin/codesearch"
         '';
@@ -89,7 +81,6 @@
         RUST_SRC_PATH = "${pkgs.fenixRustToolchain}/lib/rustlib/src/rust/library";
       };
     }) // {
-      # Non-per-system outputs
       homeManagerModules.default = import ./module {
         hmHelpers = import "${substrate}/lib/hm-service-helpers.nix" { lib = nixpkgs.lib; };
       };
