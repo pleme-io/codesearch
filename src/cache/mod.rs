@@ -93,7 +93,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cache() {
+    fn test_cache_miss_then_hit() {
         let cache = EmbeddingCache::new(100);
 
         let result = cache.get_or_compute("test", || vec![1.0, 2.0, 3.0]);
@@ -102,5 +102,69 @@ mod tests {
         let stats = cache.stats();
         assert_eq!(stats.misses, 1);
         assert_eq!(stats.hits, 0);
+
+        // Second call should be a hit
+        let result2 = cache.get_or_compute("test", || panic!("should not be called"));
+        assert_eq!(*result2, vec![1.0, 2.0, 3.0]);
+
+        let stats2 = cache.stats();
+        assert_eq!(stats2.hits, 1);
+        assert_eq!(stats2.misses, 1);
+    }
+
+    #[test]
+    fn test_cache_different_keys() {
+        let cache = EmbeddingCache::new(100);
+
+        cache.get_or_compute("key1", || vec![1.0]);
+        cache.get_or_compute("key2", || vec![2.0]);
+
+        let stats = cache.stats();
+        assert_eq!(stats.misses, 2);
+        // moka cache is eventually consistent; entry_count may lag behind
+        // Just verify both keys are retrievable (cache hits)
+        let _ = cache.get_or_compute("key1", || panic!("should be cached"));
+        let _ = cache.get_or_compute("key2", || panic!("should be cached"));
+        assert_eq!(cache.stats().hits, 2);
+    }
+
+    #[test]
+    fn test_cache_hit_rate_no_requests() {
+        let cache = EmbeddingCache::new(100);
+        assert_eq!(cache.hit_rate(), 0.0);
+    }
+
+    #[test]
+    fn test_cache_hit_rate_all_misses() {
+        let cache = EmbeddingCache::new(100);
+        cache.get_or_compute("a", || vec![1.0]);
+        cache.get_or_compute("b", || vec![2.0]);
+        assert_eq!(cache.hit_rate(), 0.0);
+    }
+
+    #[test]
+    fn test_cache_hit_rate_half_hits() {
+        let cache = EmbeddingCache::new(100);
+        cache.get_or_compute("a", || vec![1.0]); // miss
+        cache.get_or_compute("a", || panic!("hit")); // hit
+
+        assert!((cache.hit_rate() - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_cache_stats_max_memory() {
+        let cache = EmbeddingCache::new(50);
+        let stats = cache.stats();
+        assert_eq!(stats.max_memory_mb, 50);
+    }
+
+    #[test]
+    fn test_cache_overwrites_with_same_key() {
+        let cache = EmbeddingCache::new(100);
+
+        cache.get_or_compute("key", || vec![1.0, 2.0]);
+        // get_or_compute won't overwrite - it returns cached value
+        let result = cache.get_or_compute("key", || vec![9.0, 9.0]);
+        assert_eq!(*result, vec![1.0, 2.0], "Should return cached value, not recomputed");
     }
 }

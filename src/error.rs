@@ -171,4 +171,78 @@ mod tests {
         assert!(err.to_string().contains("I/O error"));
         assert!(err.to_string().contains("/test/path"));
     }
+
+    #[test]
+    fn test_embedding_error() {
+        let err = CodeSearchError::embedding("Model not loaded");
+        assert!(err.to_string().contains("Embedding error"));
+        assert!(err.to_string().contains("Model not loaded"));
+    }
+
+    #[test]
+    fn test_search_error() {
+        let err = CodeSearchError::search("No index found");
+        assert!(err.to_string().contains("Search error"));
+    }
+
+    #[test]
+    fn test_index_error() {
+        let err = CodeSearchError::index("Corrupted index");
+        assert!(err.to_string().contains("Index error"));
+    }
+
+    #[test]
+    fn test_config_error() {
+        let err = CodeSearchError::config("Invalid config key");
+        assert!(err.to_string().contains("Configuration error"));
+    }
+
+    #[test]
+    fn test_mcp_error() {
+        let err = CodeSearchError::mcp("Connection refused");
+        assert!(err.to_string().contains("MCP error"));
+    }
+
+    #[test]
+    fn test_parse_error() {
+        let err = CodeSearchError::parse("/src/main.rs", "Syntax error at line 5");
+        assert!(err.to_string().contains("Parse error"));
+        assert!(err.to_string().contains("/src/main.rs"));
+        assert!(err.to_string().contains("Syntax error"));
+    }
+
+    #[test]
+    fn test_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let cs_err: CodeSearchError = io_err.into();
+        assert!(cs_err.to_string().contains("I/O error"));
+        assert!(cs_err.to_string().contains("file not found"));
+    }
+
+    #[test]
+    fn test_from_anyhow_error() {
+        let anyhow_err = anyhow::anyhow!("something went wrong");
+        let cs_err: CodeSearchError = anyhow_err.into();
+        assert!(cs_err.to_string().contains("Database error"));
+        assert!(cs_err.to_string().contains("something went wrong"));
+    }
+
+    #[test]
+    fn test_error_is_debug() {
+        let err = CodeSearchError::database("test");
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("Database"));
+    }
+
+    #[test]
+    fn test_result_type_alias() {
+        fn returns_ok() -> Result<i32> {
+            Ok(42)
+        }
+        fn returns_err() -> Result<i32> {
+            Err(CodeSearchError::validation("bad"))
+        }
+        assert!(returns_ok().is_ok());
+        assert!(returns_err().is_err());
+    }
 }

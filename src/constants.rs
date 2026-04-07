@@ -149,3 +149,94 @@ pub const ALWAYS_EXCLUDED: &[&str] = &[
     ".nyc_output",
     ".cache",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shutdown_flag_initially_false() {
+        // The global flag should be false at start (or from a prior reset)
+        // We can't fully guarantee initial state in multi-test runs, but we can test the API
+        SHUTDOWN_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(!is_shutdown_requested());
+    }
+
+    #[test]
+    fn test_shutdown_flag_set_and_check() {
+        SHUTDOWN_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(is_shutdown_requested());
+        // Reset for other tests
+        SHUTDOWN_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[test]
+    fn test_check_shutdown_with_token() {
+        let token = tokio_util::sync::CancellationToken::new();
+
+        SHUTDOWN_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(!check_shutdown(&token));
+
+        // Signal via token
+        token.cancel();
+        assert!(check_shutdown(&token));
+
+        // Signal via global flag
+        let token2 = tokio_util::sync::CancellationToken::new();
+        SHUTDOWN_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(check_shutdown(&token2));
+
+        // Reset
+        SHUTDOWN_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[test]
+    fn test_db_dir_name_constant() {
+        assert_eq!(DB_DIR_NAME, ".codesearch.db");
+    }
+
+    #[test]
+    fn test_config_dir_name_constant() {
+        assert_eq!(CONFIG_DIR_NAME, ".codesearch");
+    }
+
+    #[test]
+    fn test_always_excluded_contains_key_dirs() {
+        assert!(ALWAYS_EXCLUDED.contains(&".git"));
+        assert!(ALWAYS_EXCLUDED.contains(&"node_modules"));
+        assert!(ALWAYS_EXCLUDED.contains(&"target"));
+        assert!(ALWAYS_EXCLUDED.contains(&"__pycache__"));
+        assert!(ALWAYS_EXCLUDED.contains(&".codesearch.db"));
+    }
+
+    #[test]
+    fn test_always_excluded_no_duplicates() {
+        let mut seen = std::collections::HashSet::new();
+        for item in ALWAYS_EXCLUDED {
+            assert!(seen.insert(item), "Duplicate entry in ALWAYS_EXCLUDED: {}", item);
+        }
+    }
+
+    #[test]
+    fn test_get_global_models_cache_dir() {
+        let result = get_global_models_cache_dir();
+        assert!(result.is_ok());
+        let dir = result.unwrap();
+        assert!(dir.to_string_lossy().contains(".codesearch"));
+        assert!(dir.to_string_lossy().contains("models"));
+    }
+
+    #[test]
+    fn test_lmdb_defaults() {
+        assert!(DEFAULT_LMDB_MAP_SIZE_MB > 0);
+        assert!(DEFAULT_CACHE_MAX_MEMORY_MB > 0);
+    }
+
+    #[test]
+    fn test_log_constants() {
+        assert_eq!(LOG_DIR_NAME, "logs");
+        assert_eq!(LOG_FILE_NAME, "codesearch.log");
+        assert!(DEFAULT_LOG_MAX_FILES > 0);
+        assert!(DEFAULT_LOG_RETENTION_DAYS > 0);
+    }
+}

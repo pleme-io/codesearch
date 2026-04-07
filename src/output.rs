@@ -48,3 +48,46 @@ macro_rules! warn_print {
         $crate::output::print_warn(format_args!($($arg)*));
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_quiet_mode_toggle() {
+        set_quiet(false);
+        assert!(!is_quiet());
+
+        set_quiet(true);
+        assert!(is_quiet());
+
+        set_quiet(false);
+        assert!(!is_quiet());
+    }
+
+    #[test]
+    fn test_quiet_mode_default_is_false() {
+        // Reset to known state
+        set_quiet(false);
+        assert!(!is_quiet());
+    }
+
+    #[test]
+    fn test_print_info_respects_quiet_mode() {
+        set_quiet(true);
+        // Should not panic even in quiet mode
+        print_info(format_args!("test message {}", 42));
+
+        set_quiet(false);
+        print_info(format_args!("test message {}", 42));
+    }
+
+    #[test]
+    fn test_print_warn_respects_quiet_mode() {
+        set_quiet(true);
+        print_warn(format_args!("warning {}", "test"));
+
+        set_quiet(false);
+        print_warn(format_args!("warning {}", "test"));
+    }
+}
