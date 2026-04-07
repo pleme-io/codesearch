@@ -407,12 +407,168 @@ pub fn resolve_database_with_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn test_find_databases() {
         let databases = find_databases();
         assert!(databases.is_ok());
-        let dbs = databases.unwrap();
-        println!("Found {} databases", dbs.len());
+    }
+
+    #[test]
+    fn test_is_valid_database_nonexistent_path() {
+        assert!(!is_valid_database(Path::new("/nonexistent/path/.codesearch.db")));
+    }
+
+    #[test]
+    fn test_is_valid_database_empty_dir() {
+        let dir = tempdir().unwrap();
+        let db_dir = dir.path().join(".codesearch.db");
+        fs::create_dir(&db_dir).unwrap();
+
+        assert!(!is_valid_database(&db_dir));
+    }
+
+    #[test]
+    fn test_is_valid_database_partial_metadata_only() {
+        let dir = tempdir().unwrap();
+        let db_dir = dir.path().join(".codesearch.db");
+        fs::create_dir(&db_dir).unwrap();
+        fs::write(db_dir.join("metadata.json"), "{}").unwrap();
+
+        assert!(!is_valid_database(&db_dir));
+    }
+
+    #[test]
+    fn test_is_valid_database_partial_metadata_and_lmdb() {
+        let dir = tempdir().unwrap();
+        let db_dir = dir.path().join(".codesearch.db");
+        fs::create_dir(&db_dir).unwrap();
+        fs::write(db_dir.join("metadata.json"), "{}").unwrap();
+        fs::write(db_dir.join("data.mdb"), "").unwrap();
+
+        assert!(!is_valid_database(&db_dir), "Missing fts/ dir should invalidate");
+    }
+
+    #[test]
+    fn test_is_valid_database_complete() {
+        let dir = tempdir().unwrap();
+        let db_dir = dir.path().join(".codesearch.db");
+        fs::create_dir(&db_dir).unwrap();
+        fs::write(db_dir.join("metadata.json"), "{}").unwrap();
+        fs::write(db_dir.join("data.mdb"), "").unwrap();
+        fs::create_dir(db_dir.join("fts")).unwrap();
+
+        assert!(is_valid_database(&db_dir));
+    }
+
+    #[test]
+    fn test_is_valid_database_file_instead_of_dir() {
+        let dir = tempdir().unwrap();
+        let db_file = dir.path().join(".codesearch.db");
+        fs::write(&db_file, "not a directory").unwrap();
+
+        assert!(!is_valid_database(&db_file));
+    }
+
+    #[test]
+    fn test_check_database_integrity_nonexistent() {
+        assert!(check_database_integrity(Path::new("/nonexistent")).is_none());
+    }
+
+    #[test]
+    fn test_check_database_integrity_not_a_dir() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("notadir");
+        fs::write(&file, "content").unwrap();
+
+        let result = check_database_integrity(&file);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("not a directory"));
+    }
+
+    #[test]
+    fn test_check_database_integrity_missing_components() {
+        let dir = tempdir().unwrap();
+        let db_dir = dir.path().join("db");
+        fs::create_dir(&db_dir).unwrap();
+
+        let result = check_database_integrity(&db_dir);
+        assert!(result.is_some());
+        let msg = result.unwrap();
+        assert!(msg.contains("metadata.json"));
+        assert!(msg.contains("data.mdb"));
+        assert!(msg.contains("fts/"));
+    }
+
+    #[test]
+    fn test_check_database_integrity_valid() {
+        let dir = tempdir().unwrap();
+        let db_dir = dir.path().join("db");
+        fs::create_dir(&db_dir).unwrap();
+        fs::write(db_dir.join("metadata.json"), "{}").unwrap();
+        fs::write(db_dir.join("data.mdb"), "").unwrap();
+        fs::create_dir(db_dir.join("fts")).unwrap();
+
+        assert!(check_database_integrity(&db_dir).is_none());
+    }
+
+    #[test]
+    fn test_find_best_database_nonexistent_path() {
+        let result = find_best_database(Some(Path::new("/tmp/nonexistent_project_path_12345")));
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_find_best_database_with_valid_db() {
+        let dir = tempdir().unwrap();
+        let db_dir = dir.path().join(DB_DIR_NAME);
+        fs::create_dir(&db_dir).unwrap();
+        fs::write(db_dir.join("metadata.json"), "{}").unwrap();
+        fs::write(db_dir.join("data.mdb"), "").unwrap();
+        fs::create_dir(db_dir.join("fts")).unwrap();
+
+        let result = find_best_database(Some(dir.path())).unwrap();
+        assert!(result.is_some());
+        let db_info = result.unwrap();
+        assert!(db_info.is_current);
+        assert_eq!(db_info.depth, 0);
+        assert!(!db_info.is_global);
+    }
+
+    #[test]
+    fn test_find_best_database_in_parent() {
+        let parent = tempdir().unwrap();
+        let db_dir = parent.path().join(DB_DIR_NAME);
+        fs::create_dir(&db_dir).unwrap();
+        fs::write(db_dir.join("metadata.json"), "{}").unwrap();
+        fs::write(db_dir.join("data.mdb"), "").unwrap();
+        fs::create_dir(db_dir.join("fts")).unwrap();
+
+        let child = parent.path().join("subdir");
+        fs::create_dir(&child).unwrap();
+
+        let result = find_best_database(Some(&child)).unwrap();
+        assert!(result.is_some());
+        let db_info = result.unwrap();
+        assert!(!db_info.is_current);
+        assert_eq!(db_info.depth, 1);
+    }
+
+    #[test]
+    fn test_database_info_fields() {
+        let info = DatabaseInfo {
+            project_path: PathBuf::from("/test/project"),
+            db_path: PathBuf::from("/test/project/.codesearch.db"),
+            is_current: true,
+            depth: 0,
+            is_global: false,
+        };
+
+        assert_eq!(info.project_path, PathBuf::from("/test/project"));
+        assert!(info.is_current);
+        assert_eq!(info.depth, 0);
+        assert!(!info.is_global);
     }
 }

@@ -335,4 +335,141 @@ mod tests {
         assert_eq!(results[0].rrf_score, 0.9);
         assert!(results[0].fts_score.is_none());
     }
+
+    #[test]
+    fn test_vector_only_empty() {
+        let results = vector_only(&[]);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_vector_only_preserves_rank() {
+        let vector_results = vec![
+            make_vector_result(10, 0.5),
+            make_vector_result(20, 0.3),
+        ];
+
+        let results = vector_only(&vector_results);
+        assert_eq!(results[0].vector_rank, Some(1));
+        assert_eq!(results[1].vector_rank, Some(2));
+        assert!(results[0].fts_rank.is_none());
+    }
+
+    #[test]
+    fn test_rrf_fusion_empty_inputs() {
+        let fused = rrf_fusion(&[], &[], 20.0);
+        assert!(fused.is_empty());
+    }
+
+    #[test]
+    fn test_rrf_fusion_vector_only_input() {
+        let vector_results = vec![make_vector_result(1, 0.9)];
+        let fused = rrf_fusion(&vector_results, &[], 20.0);
+
+        assert_eq!(fused.len(), 1);
+        assert_eq!(fused[0].chunk_id, 1);
+        assert!(fused[0].vector_rank.is_some());
+        assert!(fused[0].fts_rank.is_none());
+    }
+
+    #[test]
+    fn test_rrf_fusion_fts_only_input() {
+        let fts_results = vec![make_fts_result(1, 10.0)];
+        let fused = rrf_fusion(&[], &fts_results, 20.0);
+
+        assert_eq!(fused.len(), 1);
+        assert_eq!(fused[0].chunk_id, 1);
+        assert!(fused[0].vector_rank.is_none());
+        assert!(fused[0].fts_rank.is_some());
+    }
+
+    #[test]
+    fn test_rrf_fusion_sorted_descending() {
+        let vector = vec![make_vector_result(1, 0.9), make_vector_result(2, 0.8)];
+        let fts = vec![make_fts_result(2, 10.0), make_fts_result(3, 5.0)];
+
+        let fused = rrf_fusion(&vector, &fts, 20.0);
+
+        for i in 0..fused.len() - 1 {
+            assert!(fused[i].rrf_score >= fused[i + 1].rrf_score,
+                "Results should be sorted by rrf_score descending");
+        }
+    }
+
+    #[test]
+    fn test_rrf_fusion_overlap_boosts_rank() {
+        let vector = vec![
+            make_vector_result(1, 0.9),
+            make_vector_result(2, 0.8),
+        ];
+        let fts = vec![
+            make_fts_result(2, 10.0), // ID 2 appears in both
+            make_fts_result(3, 5.0),
+        ];
+
+        let fused = rrf_fusion(&vector, &fts, 20.0);
+
+        let id2 = fused.iter().find(|r| r.chunk_id == 2).unwrap();
+        let id1 = fused.iter().find(|r| r.chunk_id == 1).unwrap();
+        // ID 2 in both lists should have higher score than ID 1 (only vector) or ID 3 (only fts)
+        assert!(id2.rrf_score > id1.rrf_score, "Overlap item should score higher");
+    }
+
+    #[test]
+    fn test_rrf_fusion_with_exact_empty() {
+        let fused = rrf_fusion_with_exact(&[], &[], &[], 20.0, 20.0, 5.0);
+        assert!(fused.is_empty());
+    }
+
+    #[test]
+    fn test_rrf_fusion_with_exact_boosts_exact() {
+        let vector = vec![make_vector_result(1, 0.9)];
+        let fts = vec![make_fts_result(1, 10.0)];
+        let exact = vec![make_fts_result(1, 15.0)];
+
+        let fused_without_exact = rrf_fusion(&vector, &fts, 20.0);
+        let fused_with_exact = rrf_fusion_with_exact(&vector, &fts, &exact, 20.0, 20.0, 5.0);
+
+        assert!(fused_with_exact[0].rrf_score > fused_without_exact[0].rrf_score,
+            "Exact match should boost the score");
+    }
+
+    #[test]
+    fn test_rrf_fusion_with_exact_lower_k_stronger_boost() {
+        let exact = vec![make_fts_result(1, 10.0)];
+
+        // Lower exact_k should give higher score
+        let fused_low_k = rrf_fusion_with_exact(&[], &[], &exact, 20.0, 20.0, 2.0);
+        let fused_high_k = rrf_fusion_with_exact(&[], &[], &exact, 20.0, 20.0, 50.0);
+
+        assert!(fused_low_k[0].rrf_score > fused_high_k[0].rrf_score,
+            "Lower k should produce higher score (stronger boost)");
+    }
+
+    #[test]
+    fn test_rrf_k_affects_score_distribution() {
+        let vector = vec![
+            make_vector_result(1, 0.9),
+            make_vector_result(2, 0.8),
+        ];
+
+        let fused_small_k = rrf_fusion(&vector, &[], 5.0);
+        let fused_large_k = rrf_fusion(&vector, &[], 100.0);
+
+        // With smaller k, rank difference matters more
+        let diff_small = fused_small_k[0].rrf_score - fused_small_k[1].rrf_score;
+        let diff_large = fused_large_k[0].rrf_score - fused_large_k[1].rrf_score;
+        assert!(diff_small > diff_large, "Smaller k should create larger score gaps");
+    }
+
+    #[test]
+    fn test_default_rrf_k_value() {
+        assert_eq!(DEFAULT_RRF_K, 20.0);
+    }
+
+    #[test]
+    fn test_exact_match_rrf_k_lower_than_default() {
+        assert!(EXACT_MATCH_RRF_K < DEFAULT_RRF_K,
+            "Exact match k should be lower for stronger boost");
+    }
 }

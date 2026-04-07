@@ -427,4 +427,255 @@ mod tests {
         let loaded = FileMetaStore::load_or_create(db_path, "test-model", 384).unwrap();
         assert_eq!(loaded.files.len(), 1);
     }
+
+    #[test]
+    fn test_file_meta_store_stats() {
+        let mut store = FileMetaStore::new("test-model".to_string(), 384);
+
+        let stats = store.stats();
+        assert_eq!(stats.total_files, 0);
+        assert_eq!(stats.total_chunks, 0);
+        assert_eq!(stats.total_size_bytes, 0);
+
+        store.files.insert(
+            "file1.rs".to_string(),
+            FileMeta {
+                hash: "abc".to_string(),
+                mtime: 100,
+                size: 1024,
+                chunk_count: 5,
+                chunk_ids: vec![1, 2, 3, 4, 5],
+            },
+        );
+        store.files.insert(
+            "file2.rs".to_string(),
+            FileMeta {
+                hash: "def".to_string(),
+                mtime: 200,
+                size: 2048,
+                chunk_count: 3,
+                chunk_ids: vec![6, 7, 8],
+            },
+        );
+
+        let stats = store.stats();
+        assert_eq!(stats.total_files, 2);
+        assert_eq!(stats.total_chunks, 8);
+        assert_eq!(stats.total_size_bytes, 3072);
+    }
+
+    #[test]
+    fn test_file_meta_stats_total_size_mb() {
+        let stats = FileMetaStats {
+            total_files: 1,
+            total_chunks: 10,
+            total_size_bytes: 1024 * 1024, // 1 MB
+        };
+        assert!((stats.total_size_mb() - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_file_meta_stats_total_size_mb_zero() {
+        let stats = FileMetaStats {
+            total_files: 0,
+            total_chunks: 0,
+            total_size_bytes: 0,
+        };
+        assert_eq!(stats.total_size_mb(), 0.0);
+    }
+
+    #[test]
+    fn test_file_meta_store_clear() {
+        let mut store = FileMetaStore::new("test-model".to_string(), 384);
+        store.files.insert(
+            "file.rs".to_string(),
+            FileMeta {
+                hash: "abc".to_string(),
+                mtime: 100,
+                size: 500,
+                chunk_count: 2,
+                chunk_ids: vec![1, 2],
+            },
+        );
+        store.mark_full_index();
+
+        assert!(!store.files.is_empty());
+        assert!(store.last_full_index.is_some());
+
+        store.clear();
+        assert!(store.files.is_empty());
+        assert!(store.last_full_index.is_none());
+    }
+
+    #[test]
+    fn test_file_meta_store_mark_full_index() {
+        let mut store = FileMetaStore::new("test-model".to_string(), 384);
+        assert!(store.last_full_index.is_none());
+
+        store.mark_full_index();
+        assert!(store.last_full_index.is_some());
+        assert!(store.last_full_index.unwrap() > 0);
+    }
+
+    #[test]
+    fn test_file_meta_store_model_change_invalidation() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path();
+
+        let mut store = FileMetaStore::new("model-v1".to_string(), 384);
+        store.files.insert(
+            "file.rs".to_string(),
+            FileMeta {
+                hash: "abc".to_string(),
+                mtime: 100,
+                size: 500,
+                chunk_count: 2,
+                chunk_ids: vec![1, 2],
+            },
+        );
+        store.save(db_path).unwrap();
+
+        // Load with different model name
+        let loaded = FileMetaStore::load_or_create(db_path, "model-v2", 384).unwrap();
+        assert!(loaded.files.is_empty(), "Model change should invalidate all entries");
+        assert_eq!(loaded.model_name, "model-v2");
+    }
+
+    #[test]
+    fn test_file_meta_store_dimension_change_invalidation() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path();
+
+        let mut store = FileMetaStore::new("model".to_string(), 384);
+        store.files.insert("file.rs".to_string(), FileMeta {
+            hash: "abc".to_string(),
+            mtime: 100,
+            size: 500,
+            chunk_count: 1,
+            chunk_ids: vec![1],
+        });
+        store.save(db_path).unwrap();
+
+        let loaded = FileMetaStore::load_or_create(db_path, "model", 768).unwrap();
+        assert!(loaded.files.is_empty(), "Dimension change should invalidate");
+    }
+
+    #[test]
+    fn test_file_meta_store_remove_file() {
+        let mut store = FileMetaStore::new("model".to_string(), 384);
+        store.files.insert(
+            "/test/file.rs".to_string(),
+            FileMeta {
+                hash: "abc".to_string(),
+                mtime: 100,
+                size: 500,
+                chunk_count: 2,
+                chunk_ids: vec![1, 2],
+            },
+        );
+
+        let removed = store.remove_file(Path::new("/test/file.rs"));
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().chunk_ids, vec![1, 2]);
+        assert!(store.files.is_empty());
+    }
+
+    #[test]
+    fn test_file_meta_store_remove_nonexistent() {
+        let mut store = FileMetaStore::new("model".to_string(), 384);
+        let removed = store.remove_file(Path::new("/nonexistent/file.rs"));
+        assert!(removed.is_none());
+    }
+
+    #[test]
+    fn test_file_meta_store_find_deleted_files() {
+        let mut store = FileMetaStore::new("model".to_string(), 384);
+        // This path doesn't exist on disk
+        store.files.insert(
+            "/nonexistent/deleted_file.rs".to_string(),
+            FileMeta {
+                hash: "abc".to_string(),
+                mtime: 100,
+                size: 500,
+                chunk_count: 3,
+                chunk_ids: vec![10, 20, 30],
+            },
+        );
+
+        let deleted = store.find_deleted_files();
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0].0, "/nonexistent/deleted_file.rs");
+        assert_eq!(deleted[0].1, vec![10, 20, 30]);
+    }
+
+    #[test]
+    fn test_file_meta_store_find_deleted_with_existing() {
+        let dir = tempdir().unwrap();
+        let existing_file = dir.path().join("exists.rs");
+        fs::write(&existing_file, "content").unwrap();
+
+        let mut store = FileMetaStore::new("model".to_string(), 384);
+        store.files.insert(
+            normalize_path(&existing_file),
+            FileMeta {
+                hash: "abc".to_string(),
+                mtime: 100,
+                size: 7,
+                chunk_count: 1,
+                chunk_ids: vec![1],
+            },
+        );
+
+        let deleted = store.find_deleted_files();
+        assert!(deleted.is_empty(), "Existing file should not be in deleted list");
+    }
+
+    #[test]
+    fn test_compute_hash_deterministic() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.txt");
+        fs::write(&file, "hello world").unwrap();
+
+        let hash1 = FileMetaStore::compute_hash(&file).unwrap();
+        let hash2 = FileMetaStore::compute_hash(&file).unwrap();
+        assert_eq!(hash1, hash2, "Hash should be deterministic");
+        assert!(!hash1.is_empty());
+    }
+
+    #[test]
+    fn test_compute_hash_different_content() {
+        let dir = tempdir().unwrap();
+        let file1 = dir.path().join("file1.txt");
+        let file2 = dir.path().join("file2.txt");
+        fs::write(&file1, "content A").unwrap();
+        fs::write(&file2, "content B").unwrap();
+
+        let hash1 = FileMetaStore::compute_hash(&file1).unwrap();
+        let hash2 = FileMetaStore::compute_hash(&file2).unwrap();
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_tracked_files() {
+        let mut store = FileMetaStore::new("model".to_string(), 384);
+        store.files.insert("a.rs".to_string(), FileMeta {
+            hash: "a".to_string(), mtime: 1, size: 1, chunk_count: 0, chunk_ids: vec![],
+        });
+        store.files.insert("b.rs".to_string(), FileMeta {
+            hash: "b".to_string(), mtime: 2, size: 2, chunk_count: 0, chunk_ids: vec![],
+        });
+
+        let tracked: Vec<&String> = store.tracked_files().collect();
+        assert_eq!(tracked.len(), 2);
+    }
+
+    #[test]
+    fn test_load_corrupt_json() {
+        let dir = tempdir().unwrap();
+        let meta_path = dir.path().join(FILE_META_DB_NAME);
+        fs::write(&meta_path, "this is not json").unwrap();
+
+        let result = FileMetaStore::load_or_create(dir.path(), "model", 384);
+        assert!(result.is_err());
+    }
 }

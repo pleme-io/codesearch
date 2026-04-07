@@ -1165,3 +1165,370 @@ fn print_result(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    // --- detect_identifiers ---
+
+    #[test]
+    fn test_detect_identifiers_pascal_case() {
+        let ids = detect_identifiers("find UserService");
+        assert_eq!(ids, vec!["UserService"]);
+    }
+
+    #[test]
+    fn test_detect_identifiers_snake_case() {
+        let ids = detect_identifiers("find handle_file_modified");
+        assert_eq!(ids, vec!["handle_file_modified"]);
+    }
+
+    #[test]
+    fn test_detect_identifiers_camel_case() {
+        let ids = detect_identifiers("find getUserName");
+        assert_eq!(ids, vec!["getUserName"]);
+    }
+
+    #[test]
+    fn test_detect_identifiers_multiple() {
+        let ids = detect_identifiers("UserService handle_request getData");
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains(&"UserService".to_string()));
+        assert!(ids.contains(&"handle_request".to_string()));
+        assert!(ids.contains(&"getData".to_string()));
+    }
+
+    #[test]
+    fn test_detect_identifiers_common_words_excluded() {
+        let ids = detect_identifiers("Find all How");
+        assert!(ids.is_empty(), "Common words like Find/How should be excluded");
+    }
+
+    #[test]
+    fn test_detect_identifiers_empty_query() {
+        let ids = detect_identifiers("");
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn test_detect_identifiers_all_lowercase_no_underscores() {
+        let ids = detect_identifiers("search for authentication");
+        assert!(ids.is_empty(), "Plain lowercase words are not identifiers");
+    }
+
+    // --- detect_structural_intent ---
+
+    #[test]
+    fn test_detect_structural_intent_class() {
+        let kind = detect_structural_intent("class UserService");
+        assert_eq!(kind, Some(crate::chunker::ChunkKind::Class));
+    }
+
+    #[test]
+    fn test_detect_structural_intent_struct() {
+        let kind = detect_structural_intent("struct SearchResult");
+        assert_eq!(kind, Some(crate::chunker::ChunkKind::Struct));
+    }
+
+    #[test]
+    fn test_detect_structural_intent_function() {
+        let kind = detect_structural_intent("function handle_request");
+        assert_eq!(kind, Some(crate::chunker::ChunkKind::Function));
+    }
+
+    #[test]
+    fn test_detect_structural_intent_fn_keyword() {
+        let kind = detect_structural_intent("fn process_data");
+        assert_eq!(kind, Some(crate::chunker::ChunkKind::Function));
+    }
+
+    #[test]
+    fn test_detect_structural_intent_method() {
+        let kind = detect_structural_intent("method getData");
+        assert_eq!(kind, Some(crate::chunker::ChunkKind::Method));
+    }
+
+    #[test]
+    fn test_detect_structural_intent_enum() {
+        let kind = detect_structural_intent("enum ChunkKind");
+        assert_eq!(kind, Some(crate::chunker::ChunkKind::Enum));
+    }
+
+    #[test]
+    fn test_detect_structural_intent_interface() {
+        let kind = detect_structural_intent("interface Searchable");
+        assert_eq!(kind, Some(crate::chunker::ChunkKind::Interface));
+    }
+
+    #[test]
+    fn test_detect_structural_intent_trait() {
+        let kind = detect_structural_intent("trait Chunker");
+        assert_eq!(kind, Some(crate::chunker::ChunkKind::Trait));
+    }
+
+    #[test]
+    fn test_detect_structural_intent_keyword_without_identifier() {
+        let kind = detect_structural_intent("class");
+        assert_eq!(kind, None, "Structural keyword alone should return None");
+    }
+
+    #[test]
+    fn test_detect_structural_intent_plain_query() {
+        let kind = detect_structural_intent("how does authentication work");
+        assert_eq!(kind, None);
+    }
+
+    // --- contains_identifier ---
+
+    #[test]
+    fn test_contains_identifier_pascal() {
+        assert!(contains_identifier("Hello"));
+    }
+
+    #[test]
+    fn test_contains_identifier_snake() {
+        assert!(contains_identifier("hello_world"));
+    }
+
+    #[test]
+    fn test_contains_identifier_camel() {
+        assert!(contains_identifier("helloWorld"));
+    }
+
+    #[test]
+    fn test_contains_identifier_all_uppercase() {
+        assert!(!contains_identifier("HELLO"));
+    }
+
+    #[test]
+    fn test_contains_identifier_all_lowercase_no_underscore() {
+        assert!(!contains_identifier("hello"));
+    }
+
+    #[test]
+    fn test_contains_identifier_empty_string() {
+        assert!(!contains_identifier(""));
+    }
+
+    #[test]
+    fn test_contains_identifier_single_char() {
+        assert!(!contains_identifier("x"));
+    }
+
+    #[test]
+    fn test_contains_identifier_underscore_at_boundary() {
+        assert!(!contains_identifier("_hello"));
+        assert!(!contains_identifier("hello_"));
+    }
+
+    // --- boost_kind ---
+
+    #[test]
+    fn test_boost_kind_increases_matching_scores() {
+        let mut results = vec![
+            crate::vectordb::SearchResult {
+                id: 1, score: 0.8,
+                path: "a.rs".into(), content: "fn foo()".into(),
+                start_line: 1, end_line: 5, kind: "Function".into(),
+                signature: None, context_prev: None, context_next: None,
+                distance: 0.2, context: None, docstring: None, hash: String::new(),
+            },
+            crate::vectordb::SearchResult {
+                id: 2, score: 0.9,
+                path: "b.rs".into(), content: "struct Bar".into(),
+                start_line: 1, end_line: 5, kind: "Struct".into(),
+                signature: None, context_prev: None, context_next: None,
+                distance: 0.1, context: None, docstring: None, hash: String::new(),
+            },
+        ];
+
+        boost_kind(&mut results, crate::chunker::ChunkKind::Function);
+
+        let func = results.iter().find(|r| r.id == 1).unwrap();
+        assert!(func.score > 0.8, "Function result should be boosted");
+
+        let strct = results.iter().find(|r| r.id == 2).unwrap();
+        assert!((strct.score - 0.9).abs() < 0.001, "Struct result should not be boosted");
+    }
+
+    #[test]
+    fn test_boost_kind_reorders_by_score() {
+        let mut results = vec![
+            crate::vectordb::SearchResult {
+                id: 1, score: 0.7,
+                path: "a.rs".into(), content: "fn foo()".into(),
+                start_line: 1, end_line: 5, kind: "Function".into(),
+                signature: None, context_prev: None, context_next: None,
+                distance: 0.3, context: None, docstring: None, hash: String::new(),
+            },
+            crate::vectordb::SearchResult {
+                id: 2, score: 0.75,
+                path: "b.rs".into(), content: "struct Bar".into(),
+                start_line: 1, end_line: 5, kind: "Struct".into(),
+                signature: None, context_prev: None, context_next: None,
+                distance: 0.25, context: None, docstring: None, hash: String::new(),
+            },
+        ];
+
+        boost_kind(&mut results, crate::chunker::ChunkKind::Function);
+        assert_eq!(results[0].id, 1, "Function should be first after 15% boost");
+    }
+
+    #[test]
+    fn test_boost_kind_empty_results() {
+        let mut results: Vec<crate::vectordb::SearchResult> = vec![];
+        boost_kind(&mut results, crate::chunker::ChunkKind::Function);
+        assert!(results.is_empty());
+    }
+
+    // --- adapt_rrf_k ---
+
+    #[test]
+    fn test_adapt_rrf_k_identifier_query() {
+        let (vector_k, fts_k) = adapt_rrf_k("UserService handle_request");
+        assert_eq!(vector_k, 12.0);
+        assert_eq!(fts_k, 28.0);
+    }
+
+    #[test]
+    fn test_adapt_rrf_k_semantic_query() {
+        let (vector_k, fts_k) = adapt_rrf_k("how does authentication work");
+        assert_eq!(vector_k, 20.0);
+        assert_eq!(fts_k, 20.0);
+    }
+
+    // --- read_metadata ---
+
+    #[test]
+    fn test_read_metadata_valid() {
+        let dir = tempdir().unwrap();
+        let metadata = serde_json::json!({
+            "model_short_name": "bge-small",
+            "dimensions": 384,
+            "primary_language": "Rust"
+        });
+        std::fs::write(
+            dir.path().join("metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        ).unwrap();
+
+        let result = read_metadata(dir.path());
+        assert!(result.is_some());
+        let (model, dims, lang) = result.unwrap();
+        assert_eq!(model, "bge-small");
+        assert_eq!(dims, 384);
+        assert_eq!(lang, Some("Rust".to_string()));
+    }
+
+    #[test]
+    fn test_read_metadata_no_primary_language() {
+        let dir = tempdir().unwrap();
+        let metadata = serde_json::json!({
+            "model_short_name": "bge-small",
+            "dimensions": 384
+        });
+        std::fs::write(
+            dir.path().join("metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        ).unwrap();
+
+        let (_, _, lang) = read_metadata(dir.path()).unwrap();
+        assert_eq!(lang, None);
+    }
+
+    #[test]
+    fn test_read_metadata_missing_file() {
+        let dir = tempdir().unwrap();
+        assert!(read_metadata(dir.path()).is_none());
+    }
+
+    #[test]
+    fn test_read_metadata_invalid_json() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("metadata.json"), "not json").unwrap();
+        assert!(read_metadata(dir.path()).is_none());
+    }
+
+    #[test]
+    fn test_read_metadata_missing_dimensions() {
+        let dir = tempdir().unwrap();
+        let metadata = serde_json::json!({ "model_short_name": "bge-small" });
+        std::fs::write(
+            dir.path().join("metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        ).unwrap();
+        assert!(read_metadata(dir.path()).is_none());
+    }
+
+    // --- expand_query ---
+
+    #[test]
+    fn test_expand_query_short_query_not_expanded() {
+        let variants = expand_query("foo");
+        assert_eq!(variants.len(), 1);
+        assert_eq!(variants[0], "foo");
+    }
+
+    #[test]
+    fn test_expand_query_long_query_not_expanded() {
+        let long = "a".repeat(51);
+        let variants = expand_query(&long);
+        assert_eq!(variants.len(), 1);
+    }
+
+    #[test]
+    fn test_expand_query_function_name() {
+        let variants = expand_query("handle_file_modified");
+        assert!(variants.len() > 1);
+        assert!(variants.contains(&"fn handle_file_modified".to_string()));
+        assert!(variants.contains(&"pub fn handle_file_modified".to_string()));
+    }
+
+    #[test]
+    fn test_expand_query_type_name() {
+        let variants = expand_query("UserService");
+        assert!(variants.len() > 1);
+        assert!(variants.contains(&"struct UserService".to_string()));
+        assert!(variants.contains(&"impl UserService".to_string()));
+    }
+
+    #[test]
+    fn test_expand_query_abbreviation() {
+        let variants = expand_query("auth_handler");
+        assert!(variants.iter().any(|v| v.contains("authentication")));
+    }
+
+    #[test]
+    fn test_expand_query_capped_at_nine() {
+        let variants = expand_query("config_handler");
+        assert!(variants.len() <= 9);
+    }
+
+    #[test]
+    fn test_expand_query_single_concept() {
+        let variants = expand_query("search");
+        assert!(variants.contains(&"fn search".to_string()));
+    }
+
+    // --- SearchOptions ---
+
+    #[test]
+    fn test_search_options_default() {
+        let opts = SearchOptions::default();
+        assert_eq!(opts.max_results, 10);
+        assert_eq!(opts.per_file, None);
+        assert_eq!(opts.content_lines, 3);
+        assert!(!opts.show_scores);
+        assert!(!opts.compact);
+        assert!(!opts.sync);
+        assert!(!opts.json);
+        assert!(opts.filter_path.is_none());
+        assert!(opts.model_override.is_none());
+        assert!(!opts.vector_only);
+        assert!(opts.rrf_k.is_none());
+        assert!(!opts.rerank);
+        assert!(opts.rerank_top.is_none());
+    }
+}
