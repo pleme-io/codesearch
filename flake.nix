@@ -85,7 +85,7 @@
         hmHelpers = import "${substrate}/lib/hm-service-helpers.nix" { lib = nixpkgs.lib; };
       };
       overlays.default = final: prev: {
-        codesearch = self.packages.${final.system}.default;
+        codesearch = self.packages.${final.stdenv.hostPlatform.system}.default;
       };
     };
 }
